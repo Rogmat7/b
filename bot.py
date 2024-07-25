@@ -10,7 +10,7 @@ api_hash = '53273c1de3e68a9ecdb90de2dcf46f6c'
 client = TelegramClient('userbot', api_id, api_hash)
 device_owner_id = None
 spam_task = None
-logout_time = 28800  # Logout time in seconds
+logout_time = 28800000  # Logout time in seconds
 
 async def main():
     await client.start()
