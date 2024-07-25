@@ -1,5 +1,6 @@
 from telethon import TelegramClient, events
-from telethon.tl.functions.channels import JoinChannelRequest
+from telethon.tl.functions.channels import JoinChannelRequest, LeaveChannelRequest
+from telethon.tl.functions.messages import GetChatsRequest
 import asyncio
 from datetime import datetime
 
@@ -82,20 +83,23 @@ async def help(event):
         return
 
     help_text = (
-        "🛠 **Available Commands** 🛠\n\n"
-        "🔄 **Spam Commands** 🔄\n"
-        "/spam <text> - Start spamming the given text to the specified groups.\n"
-        "/stopspam - Stop the ongoing spam task.\n"
-        "/delayspam <seconds> - Set the delay between spam messages (default: 60 seconds).\n\n"
-        "🔄 **Forward Spam Commands** 🔄\n"
-        "/fwspam - Start forwarding the replied message to the specified groups.\n"
-        "/stopfwspam - Stop the ongoing forward spam task.\n"
-        "/delayfwspam <seconds> - Set the delay between forwarded messages (default: 60 seconds).\n\n"
+        "🔹 **Available Commands** 🔹\n\n"
+        "🛠 **Spam Commands** 🛠\n"
+        "➖ **/spam** <text> - Start spamming the given text to the specified groups.\n"
+        "➖ **/stopspam** - Stop the ongoing spam task.\n"
+        "➖ **/delayspam** <seconds> - Set the delay between spam messages (default: 60 seconds).\n\n"
+        "📤 **Forward Spam Commands** 📤\n"
+        "➖ **/fwspam** - Start forwarding the replied message to the specified groups.\n"
+        "➖ **/stopfwspam** - Stop the ongoing forward spam task.\n"
+        "➖ **/delayfwspam** <seconds> - Set the delay between forwarded messages (default: 60 seconds).\n\n"
+        "🗂 **Additional Commands** 🗂\n"
+        "➖ **/chatid** - List all chat IDs and titles.\n"
+        "➖ **/remove** <group_id> - Remove a specified group ID from the list.\n\n"
         "ℹ️ **Help Command** ℹ️\n"
-        "/help - Show this help message.\n"
+        "➖ **/help** - Show this help message.\n"
         "👤 **Owner**: `@pakanwedus`"
     )
-    await event.respond(help_text)
+    await event.respond(help_text, parse_mode='markdown')
 
 @client.on(events.NewMessage(pattern='/spam'))
 async def spam(event):
@@ -237,7 +241,7 @@ async def fwspam(event):
 
             forward_task = client.loop.create_task(forward_task_func())
         else:
-            await event.respond("Please reply to the message you want to forward.")
+            await event.respond("The replied message doesn't contain any text.")
     else:
         await event.respond("Please reply to the message you want to forward.")
 
@@ -313,5 +317,56 @@ async def delayfwspam(event):
         await event.respond(f"Forward spam delay updated to {forward_delay} seconds.")
     except ValueError:
         await event.respond("Invalid delay value. Please enter a number.")
+
+@client.on(events.NewMessage(pattern='/chatid'))
+async def chatid(event):
+    sender = await event.get_sender()
+    print(f"Command invoked by user ID: {sender.id}")
+
+    # Ensure the sender is the device owner
+    if not is_device_owner(sender.id):
+        await event.respond("You are not authorized to use this command.")
+        print("Unauthorized access attempt blocked.")
+        return
+
+    try:
+        chats = await client(GetChatsRequest(
+            chat_ids=[],
+        ))
+        chat_list = [f"{chat.id} - {chat.title}" for chat in chats.chats]
+        if chat_list:
+            chat_ids_text = "\n".join(chat_list)
+            await event.respond(f"**Chat IDs:**\n{chat_ids_text}")
+        else:
+            await event.respond("No chats found.")
+    except Exception as e:
+        await event.respond(f"An error occurred: {e}")
+
+@client.on(events.NewMessage(pattern='/remove'))
+async def remove(event):
+    sender = await event.get_sender()
+    print(f"Command invoked by user ID: {sender.id}")
+
+    # Ensure the sender is the device owner
+    if not is_device_owner(sender.id):
+        await event.respond("You are not authorized to use this command.")
+        print("Unauthorized access attempt blocked.")
+        return
+
+    args = event.message.message.split(maxsplit=1)
+    if len(args) != 2:
+        await event.respond("Usage: /remove <group_id>")
+        return
+
+    group_id = args[1]
+    groups = load_groups()
+
+    if group_id in groups:
+        groups.remove(group_id)
+        with open('groups.txt', 'w') as file:
+            file.write("\n".join(groups))
+        await event.respond(f"Removed group ID `{group_id}` from the list.")
+    else:
+        await event.respond(f"Group ID `{group_id}` not found in the list.")
 
 client.loop.run_until_complete(start_client())
