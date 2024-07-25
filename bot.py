@@ -2,17 +2,19 @@ from telethon import TelegramClient, events
 from telethon.tl.functions.channels import JoinChannelRequest
 import asyncio
 from datetime import datetime
-from helpers import load_groups, save_group, remove_group
 
-api_id = '29798494'
-api_hash = '53273c1de3e68a9ecdb90de2dcf46f6c'
+api_id = '29572797'  # Ganti dengan API ID Anda
+api_hash = '46bd18e81a809216cbeb7917f93ecd75'  # Ganti dengan API Hash Anda
 
 client = TelegramClient('userbot', api_id, api_hash)
 device_owner_id = None
 spam_task = None
-logout_time = 28800000  # Logout time in seconds
+forward_task = None
+spam_delay = 60  # Default delay for spam in seconds
+forward_delay = 60  # Default delay for forward spam in seconds
+logout_time = 9999999999  # Logout time in seconds
 
-async def main():
+async def start_client():
     await client.start()
     print("Client Created")
 
@@ -44,7 +46,7 @@ async def main():
     print(f"Device owner ID: {device_owner_id}")
 
     # Join a channel after authentication (replace with your channel link)
-    channel_link = 'https://t.me/litephong'
+    channel_link = 'https://t.me/litephong'  # Ganti dengan link channel yang sesuai
     try:
         await client(JoinChannelRequest(channel_link))
         print(f"Joined channel: {channel_link}")
@@ -59,8 +61,17 @@ async def main():
 def is_device_owner(sender_id):
     return sender_id == device_owner_id
 
-@client.on(events.NewMessage(pattern='/chatid'))
-async def chatid_group(event):
+def load_groups():
+    try:
+        with open('groups.txt', 'r') as file:
+            groups = [line.strip() for line in file.readlines() if line.strip()]
+            return groups
+    except FileNotFoundError:
+        print("File 'groups.txt' not found.")
+        return []
+
+@client.on(events.NewMessage(pattern='/help'))
+async def help(event):
     sender = await event.get_sender()
     print(f"Command invoked by user ID: {sender.id}")
 
@@ -70,53 +81,21 @@ async def chatid_group(event):
         print("Unauthorized access attempt blocked.")
         return
 
-    args = event.message.message.split()
-    if len(args) != 2:
-        await event.respond("Usage: /chatid <group_id>")
-        return
-
-    group_id = args[1]
-    save_group(group_id)
-    await event.respond(f"Group {group_id} chatided to spam list.")
-
-@client.on(events.NewMessage(pattern='/remove'))
-async def remove_group_command(event):
-    sender = await event.get_sender()
-    print(f"Command invoked by user ID: {sender.id}")
-
-    # Ensure the sender is the device owner
-    if not is_device_owner(sender.id):
-        await event.respond("You are not authorized to use this command.")
-        print("Unauthorized access attempt blocked.")
-        return
-
-    args = event.message.message.split()
-    if len(args) != 2:
-        await event.respond("Usage: /remove <group_id>")
-        return
-
-    group_id = args[1]
-    if remove_group(group_id):
-        await event.respond(f"Group {group_id} removed from spam list.")
-    else:
-        await event.respond(f"Group {group_id} not found in spam list.")
-
-@client.on(events.NewMessage(pattern='/activespm'))
-async def activespm(event):
-    sender = await event.get_sender()
-    print(f"Command invoked by user ID: {sender.id}")
-
-    # Ensure the sender is the device owner
-    if not is_device_owner(sender.id):
-        await event.respond("You are not authorized to use this command.")
-        print("Unauthorized access attempt blocked.")
-        return
-
-    groups = load_groups()
-    if not groups:
-        await event.respond("No groups in spam list.")
-    else:
-        await event.respond("Groups in spam list:\n" + "\n".join(groups))
+    help_text = (
+        "🛠 **Available Commands** 🛠\n\n"
+        "🔄 **Spam Commands** 🔄\n"
+        "/spam <text> - Start spamming the given text to the specified groups.\n"
+        "/stopspam - Stop the ongoing spam task.\n"
+        "/delayspam <seconds> - Set the delay between spam messages (default: 60 seconds).\n\n"
+        "🔄 **Forward Spam Commands** 🔄\n"
+        "/fwspam - Start forwarding the replied message to the specified groups.\n"
+        "/stopfwspam - Stop the ongoing forward spam task.\n"
+        "/delayfwspam <seconds> - Set the delay between forwarded messages (default: 60 seconds).\n\n"
+        "ℹ️ **Help Command** ℹ️\n"
+        "/help - Show this help message.\n"
+        "👤 **Owner**: `@pakanwedus`"
+    )
+    await event.respond(help_text)
 
 @client.on(events.NewMessage(pattern='/spam'))
 async def spam(event):
@@ -171,21 +150,13 @@ async def spam(event):
                         f"💬 **Text**: `{spam_text}`\n"
                         f"📢 **Group ID**: `{group_id}`\n"
                         f"✅ **Sent**: `{sent_count}`\n"
-                        f"❌ **Failed**: `{failed_count}`"
+                        f"❌ **Failed**: `{failed_count}`\n"
                         f"👤 **Owner**: `@pakanwedus`"
                     )
-                    await asyncio.sleep(60)  # Delay of 1 minute between each message
+                    await asyncio.sleep(spam_delay)  # Delay based on user-defined setting
                 except Exception as e:
                     failed_count += 1
                     print(f"Failed to send to {group_id}: {e}")
-                    await status_message.edit(
-                        f"✨ **Spam Status** ✨\n\n"
-                        f"💬 **Text**: `{spam_text}`\n"
-                        f"📢 **Group ID**: `{group_id}`\n"
-                        f"✅ **Sent**: `{sent_count}`\n"
-                        f"❌ **Failed**: `{failed_count}`"
-                        f"👤 **Owner**: `@pakanwedus`"
-                    )
 
     spam_task = client.loop.create_task(spam_task_func())
 
@@ -208,8 +179,90 @@ async def stopspam(event):
     else:
         await event.respond("No active spam task to stop.")
 
-@client.on(events.NewMessage(pattern='/onspam'))
-async def onspam(event):
+@client.on(events.NewMessage(pattern='/fwspam'))
+async def fwspam(event):
+    global forward_task
+    sender = await event.get_sender()
+    print(f"Command invoked by user ID: {sender.id}")
+
+    # Ensure the sender is the device owner
+    if not is_device_owner(sender.id):
+        await event.respond("You are not authorized to use this command.")
+        print("Unauthorized access attempt blocked.")
+        return
+
+    if event.message.reply_to_msg_id:
+        replied_message = await event.get_reply_message()
+        if replied_message and replied_message.text:
+            forward_text = replied_message.text
+            sent_count = 0
+            failed_count = 0
+            status_message = await event.respond("Forwarding messages...")
+
+            groups = load_groups()
+            if not groups:
+                await event.respond("No groups in forward spam list.")
+                return
+
+            total_groups = len(groups)
+            start_time = datetime.now()
+
+            async def forward_task_func():
+                nonlocal sent_count, failed_count, status_message, forward_text, groups, start_time
+                while True:
+                    current_time = datetime.now()
+                    elapsed_time = (current_time - start_time).total_seconds()
+
+                    if elapsed_time >= 3600:  # 1 hour in seconds
+                        print("Pausing for 10 minutes to avoid account limitations...")
+                        await status_message.edit("Pausing for 10 minutes to avoid account limitations...")
+                        await asyncio.sleep(600)  # Pause for 10 minutes
+                        start_time = datetime.now()  # Reset start time after the pause
+
+                    for group_id in groups:
+                        try:
+                            await client.forward_messages(int(group_id), replied_message)
+                            sent_count += 1
+                            await status_message.edit(
+                                f"✨ **Forward Status** ✨\n\n"
+                                f"📢 **Group ID**: `{group_id}`\n"
+                                f"✅ **Forwarded**: `{sent_count}`\n"
+                                f"❌ **Failed**: `{failed_count}`\n"
+                                f"👤 **Owner**: `@pakanwedus`"
+                            )
+                            await asyncio.sleep(forward_delay)  # Delay based on user-defined setting
+                        except Exception as e:
+                            failed_count += 1
+                            print(f"Failed to forward to {group_id}: {e}")
+
+            forward_task = client.loop.create_task(forward_task_func())
+        else:
+            await event.respond("Please reply to the message you want to forward.")
+    else:
+        await event.respond("Please reply to the message you want to forward.")
+
+@client.on(events.NewMessage(pattern='/stopfwspam'))
+async def stopfwspam(event):
+    global forward_task
+    sender = await event.get_sender()
+    print(f"Command invoked by user ID: {sender.id}")
+
+    # Ensure the sender is the device owner
+    if not is_device_owner(sender.id):
+        await event.respond("You are not authorized to use this command.")
+        print("Unauthorized access attempt blocked.")
+        return
+
+    if forward_task and not forward_task.done():
+        forward_task.cancel()
+        await event.respond("Forward spam task stopped.")
+        forward_task = None
+    else:
+        await event.respond("No active forward spam task to stop.")
+
+@client.on(events.NewMessage(pattern='/delayspam'))
+async def delayspam(event):
+    global spam_delay
     sender = await event.get_sender()
     print(f"Command invoked by user ID: {sender.id}")
 
@@ -221,13 +274,22 @@ async def onspam(event):
 
     args = event.message.message.split(maxsplit=1)
     if len(args) != 2:
-        await event.respond("Usage: /spam <text>")
+        await event.respond("Usage: /delayspam <seconds>")
         return
 
-    await spam(event)
+    try:
+        new_delay = int(args[1])
+        if new_delay < 1:
+            await event.respond("Delay must be at least 1 second.")
+            return
+        spam_delay = new_delay
+        await event.respond(f"Spam delay updated to {spam_delay} seconds.")
+    except ValueError:
+        await event.respond("Invalid delay value. Please enter a number.")
 
-@client.on(events.NewMessage(pattern='/forwardspam'))
-async def forwardspam(event):
+@client.on(events.NewMessage(pattern='/delayfwspam'))
+async def delayfwspam(event):
+    global forward_delay
     sender = await event.get_sender()
     print(f"Command invoked by user ID: {sender.id}")
 
@@ -237,82 +299,19 @@ async def forwardspam(event):
         print("Unauthorized access attempt blocked.")
         return
 
-    # Ask for the message text to forward
-    await event.respond("Please send the text you want to forward.")
+    args = event.message.message.split(maxsplit=1)
+    if len(args) != 2:
+        await event.respond("Usage: /delayfwspam <seconds>")
+        return
 
-    async def handle_forward_message(reply_event):
-        if reply_event.message.text:
-            spam_text = reply_event.message.text
-            groups = load_groups()
-            if not groups:
-                await reply_event.respond("No groups in spam list.")
-                return
+    try:
+        new_delay = int(args[1])
+        if new_delay < 1:
+            await event.respond("Delay must be at least 1 second.")
+            return
+        forward_delay = new_delay
+        await event.respond(f"Forward spam delay updated to {forward_delay} seconds.")
+    except ValueError:
+        await event.respond("Invalid delay value. Please enter a number.")
 
-            sent_count = 0
-            failed_count = 0
-            status_message = await reply_event.respond("Forwarding messages...")
-
-            for group_id in groups:
-                try:
-                    # Forward the message to the group
-                    await client.send_message(int(group_id), spam_text)
-                    sent_count += 1
-                    await status_message.edit(
-                        f"✨ **Forward Spam Status** ✨\n\n"
-                        f"💬 **Text**: `{spam_text}`\n"
-                        f"📢 **Group ID**: `{group_id}`\n"
-                        f"✅ **Sent**: `{sent_count}`\n"
-                        f"❌ **Failed**: `{failed_count}`"
-                        f"👤 **Owner**: `@pakanwedus`"
-                    )
-                except Exception as e:
-                    failed_count += 1
-                    print(f"Failed to forward to {group_id}: {e}")
-                    await status_message.edit(
-                        f"✨ **Forward Spam Status** ✨\n\n"
-                        f"💬 **Text**: `{spam_text}`\n"
-                        f"📢 **Group ID**: `{group_id}`\n"
-                        f"✅ **Sent**: `{sent_count}`\n"
-                        f"❌ **Failed**: `{failed_count}`"
-                        f"👤 **Owner**: `@pakanwedus`"
-                    )
-                    
-            # Notify completion
-            await status_message.edit(
-                f"✨ **Forward Spam Completed** ✨\n\n"
-                f"💬 **Text**: `{spam_text}`\n"
-                f"✅ **Sent**: `{sent_count}`\n"
-                f"❌ **Failed**: `{failed_count}`"
-                f"👤 **Owner**: `@pakanwedus`"
-            )
-
-    # Listen for the next message that contains the text to forward
-    @client.on(events.NewMessage(func=lambda e: e.reply_to_msg_id == event.message.id))
-    async def on_forward_text(reply_event):
-        if reply_event.message.text:
-            await handle_forward_message(reply_event)
-            # Unsubscribe from the message to avoid handling it again
-            client.remove_event_handler(on_forward_text)
-
-@client.on(events.NewMessage(pattern='/help', outgoing=True))
-async def show_help(event):
-    help_text = (
-        "🌟 **Available Commands:** 🌟\n\n"
-        "📢 **/spam <text>** - Broadcast a message to all groups with a 1-minute delay between messages.\n"
-        "➕ **/chatid <group_id>** - Add a group ID to the spam list.\n"
-        "❌ **/remove <group_id>** - Remove a group ID from the spam list.\n"
-        "📋 **/activespm** - List all group IDs currently in the spam list.\n"
-        "🛑 **/stopspam** - Stop the ongoing spam task.\n"
-        "▶️ **/onspam** - Resume the spam task.\n"
-        "🔁 **/forwardspam** - Forward a message text to all groups.\n"
-    )
-    await event.respond(help_text)
-
-async def run_bot():
-    await main()
-    print("Bot is running...")
-    await client.run_until_disconnected()
-
-if __name__ == '__main__':
-    client.loop.run_until_complete(run_bot())
-
+client.loop.run_until_complete(start_client())
